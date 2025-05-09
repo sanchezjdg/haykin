@@ -1,0 +1,182 @@
+<!-- Main HTML document for the 3D point cloud viewer using Potree -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Title of the application -->
+    <title>Haykin</title>
+
+    <!-- CSS dependencies for the application -->
+    <!-- Potree main styling -->
+    <link rel="stylesheet" type="text/css" href="./libs/potree/potree.css">
+    <!-- jQuery UI styling for UI components -->
+    <link rel="stylesheet" type="text/css" href="./libs/jquery-ui/jquery-ui.min.css">
+    <!-- OpenLayers styling for maps -->
+    <link rel="stylesheet" type="text/css" href="./libs/openlayers3/ol.css">
+    <!-- Color picker styling -->
+    <link rel="stylesheet" type="text/css" href="./libs/spectrum/spectrum.css">
+    <!-- Tree view styling -->
+    <link rel="stylesheet" type="text/css" href="./libs/jstree/themes/mixed/style.css">
+</head>
+<body>
+    <!-- Main container for the Potree viewer -->
+    <div class="potree_container" style="position: absolute; width: 100%; height: 100%; left: 0; top: 0;">
+        <!-- Main rendering area for the point cloud -->
+        <div id="potree_render_area" style="background-image: url('./libs/potree/resources/images/background.jpg');"></div>
+        <!-- Container for the sidebar controls -->
+        <div id="potree_sidebar_container"></div>
+    </div>
+
+    <!-- Container for displaying latest data updates -->
+    <div id="latest-data" style="white-space: pre-wrap; font-family: monospace; margin-top: 20px;"></div>
+
+    <!-- JavaScript dependencies -->
+    <!-- jQuery for DOM manipulation -->
+    <script src="./libs/jquery/jquery-3.1.1.min.js"></script>
+    <!-- Color picker library -->
+    <script src="./libs/spectrum/spectrum.js"></script>
+    <!-- jQuery UI for interface components -->
+    <script src="./libs/jquery-ui/jquery-ui.min.js"></script>
+    <!-- Binary heap implementation -->
+    <script src="./libs/other/BinaryHeap.js"></script>
+    <!-- Animation library -->
+    <script src="./libs/tween/tween.min.js"></script>
+    <!-- Data visualization library -->
+    <script src="./libs/d3/d3.js"></script>
+    <!-- Coordinate transformation library -->
+    <script src="./libs/proj4/proj4.js"></script>
+    <!-- OpenLayers for map functionality -->
+    <script src="./libs/openlayers3/ol.js"></script>
+    <!-- Internationalization library -->
+    <script src="./libs/i18next/i18next.js"></script>
+    <!-- Tree view library -->
+    <script src="./libs/jstree/jstree.js"></script>
+    <!-- Three.js for 3D rendering -->
+    <script src="../libs/three.js/build/three.min.js"></script>
+    <!-- Potree main library -->
+    <script src="./libs/potree/potree.js"></script>
+    <!-- LAS/LAZ point cloud loading library -->
+    <script src="./libs/plasio/js/laslaz.js"></script>
+
+    <script type="module">
+        // Define geographic coordinate reference systems
+        proj4.defs('EPSG:4326', '+proj=longlat +datum=WGS84 +no_defs');
+        proj4.defs('EPSG:32618', '+proj=utm +zone=18 +datum=WGS84 +units=m +no_defs');
+
+        // Initialize the application when the window loads
+        window.addEventListener('load', async () => {
+            // Ensure THREE.js is properly initialized for Potree
+            if (!window.THREE && window.Potree) {
+                window.THREE = Potree.THREE;
+            }
+
+            // Create and configure the Potree viewer with initial settings
+            window.viewer = new Potree.Viewer(document.getElementById("potree_render_area"));
+            viewer.setEDLEnabled(true);          // Enable enhanced visualization
+            viewer.setFOV(60);                   // Set 60-degree field of view
+            viewer.setPointBudget(2000000);      // Set maximum points to render
+            viewer.loadSettingsFromURL();        // Load any settings from URL parameters
+            viewer.setDescription("");           // Clear default description
+
+            // Initialize the GUI with custom settings
+            viewer.loadGUI(() => {
+                viewer.setLanguage('en');
+                // Show important menu panels by default
+                $("#menu_appearance").next().show();
+                $("#menu_tools").next().show();
+                $("#menu_clipping").next().show();
+                viewer.toggleSidebar();
+            });
+
+            // Load the point cloud data from the local directory
+            Potree.loadPointCloud("./pointclouds/Malecon1/metadata.json", "Malecon1", e => {
+                const pointcloud = e.pointcloud;
+                // Configure point cloud visualization settings
+                pointcloud.material.size = 1;
+                pointcloud.material.pointSizeType = Potree.PointSizeType.ADAPTIVE;
+                pointcloud.material.shape = Potree.PointShape.SQUARE;
+
+                // Add the point cloud to the scene and adjust view
+                viewer.scene.addPointCloud(pointcloud);
+                viewer.fitToScreen();
+
+                const scene = viewer.scene;
+                let latestMeasurement = null;
+
+                // Function to fetch and visualize the most recent point data
+                async function fetchAndAddLatestPoint() {
+                    try {
+                        const response = await fetch('/latest');
+                        if (!response.ok) return;
+                        const data = await response.json();
+
+                        // Remove previous point marker if it exists
+                        if (latestMeasurement) {
+                            viewer.scene.removeMeasurement(latestMeasurement);
+                            latestMeasurement = null;
+                        }
+
+                        // Validate incoming coordinate data
+                        if (typeof data.latitude !== 'number' || typeof data.longitude !== 'number') return;
+
+                        // Transform geographic coordinates to local coordinate system
+                        const worldPos = convertToWorldCoordinates(
+                            data.latitude,
+                            data.longitude,
+                            data.altitude || 0
+                        );
+
+                        // Create and add a new measurement marker
+                        const meas = new Potree.Measure();
+                        meas.name = "Latest Point";
+                        meas.showCoordinates = true;
+                        meas.maxMarkers = 1;
+                        meas.addMarker(new THREE.Vector3(worldPos.x, worldPos.y, worldPos.z));
+                        scene.addMeasurement(meas);
+
+                        latestMeasurement = meas;
+                    } catch (err) {
+                        console.error('Error fetching point:', err);
+                    }
+                }
+
+                // Set up periodic updates of point data
+                fetchAndAddLatestPoint();
+                setInterval(fetchAndAddLatestPoint, 5000);  // Update every 5 seconds
+
+                // Initialize clear data button functionality
+                document.getElementById('clear-data-btn').addEventListener('click', () => {
+                    document.getElementById('latest-data').innerText = '';
+                    if (latestMeasurement) {
+                        viewer.scene.removeMeasurement(latestMeasurement);
+                        latestMeasurement = null;
+                    }
+                });
+            });
+        });
+
+        // Utility function to convert GPS coordinates to local coordinate system
+        function convertToWorldCoordinates(lat, lon, alt) {
+            const [easting, northing] = proj4('EPSG:4326', 'EPSG:32618', [lon, lat]);
+            const height = 32;  // alt
+            return { x: easting, y: northing, z: height };
+        }
+
+        // Function to continuously update raw data display
+        async function fetchLatestData() {
+            try {
+                const response = await fetch('/latest');
+                if (!response.ok) return;
+                const data = await response.json();
+                document.getElementById('latest-data').innerText = JSON.stringify(data, null, 2);
+            } catch (error) {
+                console.error('Error fetching latest data:', error);
+            }
+        }
+        // Set up periodic data updates
+        setInterval(fetchLatestData, 1000);  // Update every second
+        fetchLatestData();  // Initial data fetch
+    </script>
+</body>
+</html>
