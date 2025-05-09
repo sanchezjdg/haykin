@@ -159,7 +159,7 @@
         // Utility function to convert GPS coordinates to local coordinate system
         function convertToWorldCoordinates(lat, lon, alt) {
             const [easting, northing] = proj4('EPSG:4326', 'EPSG:32618', [lon, lat]);
-            const height = 32;  // alt
+            const height = alt + 34;  // geoid height
             return { x: easting, y: northing, z: height };
         }
 
