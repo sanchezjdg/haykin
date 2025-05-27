@@ -2,7 +2,7 @@
 // -----------------------------
 // Connects to DynamoDB, scans the "Positions" table,
 // converts latitude/longitude to UTM coordinates,
-// and returns the most recent record.
+// parses sensor data, and returns the most recent record.
 // Uses AWS SDK v3, proj4 for reprojection.
 
 const { DynamoDBClient, ScanCommand } = require('@aws-sdk/client-dynamodb');
@@ -42,7 +42,8 @@ const dbClient = new DynamoDBClient({
 /**
  * Fetches and returns the latest position record from DynamoDB.
  * Reprojects to UTM, applies offset to align with Potree world.
- * @returns {Object|null} Latest { latitude, longitude, altitude, x, y, z, timestamp } or null
+ * Parses additional sensor fields.
+ * @returns {Object|null} Latest { latitude, longitude, altitude, x, y, z, timestamp, mag_x, mag_y, mag_z, light_level, pressure, sound_level } or null
  */
 async function getLatestPosition() {
   try {
@@ -55,7 +56,6 @@ async function getLatestPosition() {
       return null;
     }
 
-    // Parse and filter valid items
     const parsed = result.Items
       .map(item => {
         try {
@@ -67,12 +67,33 @@ async function getLatestPosition() {
 
           // Reproject to UTM Zone 18N
           const [easting, northing] = proj4(WGS84, UTM18N, [lon, lat]);
-          // Convert to Potree relative metres
           const x = easting - METADATA_OFFSET[0];
           const y = northing - METADATA_OFFSET[1];
           const z = alt - METADATA_OFFSET[2];
 
-          return { latitude: lat, longitude: lon, altitude: alt, x, y, z, timestamp: ts };
+          // Sensor fields
+          const mag_x = Number(p.mag_x?.S ?? NaN);
+          const mag_y = Number(p.mag_y?.S ?? NaN);
+          const mag_z = Number(p.mag_z?.S ?? NaN);
+          const light_level = Number(p.light_level?.S ?? NaN);
+          const pressure = Number(p.pressure?.S ?? NaN);
+          const sound_level = Number(p.sound_level?.S ?? NaN);
+
+          return {
+            latitude: lat,
+            longitude: lon,
+            altitude: alt,
+            x,
+            y,
+            z,
+            timestamp: ts,
+            mag_x,
+            mag_y,
+            mag_z,
+            light_level,
+            pressure,
+            sound_level
+          };
         } catch (e) {
           console.error('⚠️ Error parsing item:', e);
           return null;
@@ -85,7 +106,6 @@ async function getLatestPosition() {
       return null;
     }
 
-    // Return most recent by timestamp
     const latest = parsed.sort((a, b) => b.timestamp - a.timestamp)[0];
     console.log('📌 Latest record:', latest);
     return latest;
