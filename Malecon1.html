@@ -11,58 +11,29 @@
     <link rel="stylesheet" type="text/css" href="./libs/jstree/themes/mixed/style.css">
     <style>
         /* Fixed sensor data toggle button */
-        #sensor-data-btn {
-            position: fixed;
-            top: 10px;
-            right: 10px;
-            z-index: 1000;
-            background: rgba(0,0,0,0.6);
-            color: #fff;
-            border: none;
-            padding: 6px 12px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-family: sans-serif;
-        }
-        #sensor-data-btn:hover {
-            background: rgba(0,0,0,0.8);
-        }
-        /* Styled floating panel matching Potree annotation */
-        #sensor-panel {
-            position: fixed;
-            top: 50px;
-            right: 10px;
-            width: 280px;
-            background: rgba(20,20,20,0.9);
-            color: #eee;
-            border: 1px solid #555;
-            border-radius: 4px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.7);
-            font-family: sans-serif;
-            display: none;
-            z-index: 1000;
-        }
-        #sensor-panel .header {
-            background: rgba(40,40,40,0.95);
-            padding: 6px 8px;
-            font-weight: bold;
-            font-size: 14px;
-            border-bottom: 1px solid #555;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        #sensor-panel .header .close-btn {
-            cursor: pointer;
-            font-size: 16px;
-            line-height: 1;
-        }
-        #sensor-panel .content {
-            padding: 8px;
-            white-space: pre-wrap;
-            font-family: monospace;
-            font-size: 13px;
-        }
+        #sensor-data-btn { position: fixed; top: 10px; right: 10px; z-index: 1000; background: rgba(0,0,0,0.6); color: #fff; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-family: sans-serif; transition: background 0.2s; }
+        #sensor-data-btn:hover { background: rgba(0,0,0,0.8); }
+        #clear-data-btn { position: fixed; top: 10px; right: 100px; z-index: 1000; background: rgba(0,0,0,0.6); color: #fff; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-family: sans-serif; transition: background 0.2s; }
+        #clear-data-btn:hover { background: rgba(0,0,0,0.8); }
+        #graphs-btn { position: fixed; top: 10px; right: 190px; z-index: 1000; background: rgba(0,0,0,0.6); color: #fff; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-family: sans-serif; transition: background 0.2s; }
+        #graphs-btn:hover { background: rgba(0,0,0,0.8); }
+        #sensor-panel { position: fixed; top: 50px; right: 10px; width: 280px; background: rgba(20,20,20,0.9); color: #eee; border: 1px solid #555; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.7); font-family: sans-serif; display: none; z-index: 1000; }
+        #sensor-panel.show { display: block; }
+        #sensor-panel .header { background: rgba(40,40,40,0.95); padding: 6px 8px; font-weight: bold; font-size: 14px; border-bottom: 1px solid #555; display: flex; justify-content: space-between; align-items: center; }
+        #sensor-panel .header .close-btn { cursor: pointer; font-size: 16px; }
+        #sensor-panel .content { padding: 8px; white-space: pre-wrap; font-family: monospace; font-size: 13px; }
+        #graphs-panel { position: fixed; top: 50px; right: 300px; width: 420px; height: 280px; background: rgba(20,20,20,0.9); color: #eee; border: 1px solid #555; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.7); font-family: sans-serif; display: none; z-index: 1000; }
+        #graphs-panel.show { display: block; }
+        #graphs-panel .header { background: rgba(40,40,40,0.95); padding: 6px 8px; font-weight: bold; font-size: 14px; border-bottom: 1px solid #555; display: flex; justify-content: space-between; align-items: center; }
+        #graphs-panel .header .close-btn { cursor: pointer; font-size: 16px; }
+        #graphs-content { padding: 8px; height: calc(100% - 40px); overflow: hidden; }
+        .axis text { fill: #ccc; font-size: 11px; }
+        .axis path, .axis line { fill: none; stroke: #666; shape-rendering: crispEdges; }
+        .grid line { stroke: #333; stroke-opacity: 0.5; shape-rendering: crispEdges; }
+        .grid path { stroke-width: 0; }
+        .status-indicator { position: fixed; top: 50px; left: 10px; background: rgba(20,20,20,0.9); color: #eee; padding: 6px 12px; border-radius: 4px; font-family: sans-serif; font-size: 12px; z-index: 1000; }
+        .status-online { color: #00ff88; }
+        .status-offline { color: #ff4444; }
     </style>
 </head>
 <body>
@@ -70,29 +41,27 @@
         <div id="potree_render_area" style="background-image: url('./libs/potree/resources/images/background.jpg');"></div>
         <div id="potree_sidebar_container"></div>
     </div>
-
-    <!-- Toggle Button -->
-    <button id="sensor-data-btn">Data</button>
-
-    <!-- Floating Panel -->
-    <div id="sensor-panel">
-        <div class="header">
-            <span>Data</span>
-            <span class="close-btn">&times;</span>
-        </div>
-        <div class="content" id="sensor-content"></div>
+    <div id="status-indicator" class="status-indicator">
+        <span id="connection-status" class="status-offline">● Offline</span>
     </div>
-
-    <button id="clear-data-btn" style="position: fixed; top: 10px; right: 100px; z-index: 1000;
-        background: rgba(0,0,0,0.6); color: #fff; border:none; padding:6px 12px;
-        border-radius:4px; cursor:pointer;">Clear All</button>
-
+    <button id="sensor-data-btn">Data</button>
+    <button id="clear-data-btn">Clear All</button>
+    <button id="graphs-btn">Graphs</button>
+    <div id="sensor-panel">
+        <div class="header"><span>Sensor Data</span><span class="close-btn">&times;</span></div>
+        <div class="content" id="sensor-content">No data available</div>
+    </div>
+    <div id="graphs-panel">
+        <div class="header"><span>Light Level vs Time</span><span class="close-btn">&times;</span></div>
+        <div id="graphs-content"></div>
+    </div>
     <script src="./libs/jquery/jquery-3.1.1.min.js"></script>
     <script src="./libs/spectrum/spectrum.js"></script>
     <script src="./libs/jquery-ui/jquery-ui.min.js"></script>
     <script src="./libs/other/BinaryHeap.js"></script>
     <script src="./libs/tween/tween.min.js"></script>
-    <script src="./libs/d3/d3.js"></script>
+    <!-- Carga D3 v3 -->
+    <script src="https://d3js.org/d3.v3.min.js"></script>
     <script src="./libs/proj4/proj4.js"></script>
     <script src="./libs/openlayers3/ol.js"></script>
     <script src="./libs/i18next/i18next.js"></script>
@@ -100,82 +69,136 @@
     <script src="../libs/three.js/build/three.min.js"></script>
     <script src="./libs/potree/potree.js"></script>
     <script src="./libs/plasio/js/laslaz.js"></script>
-
-    <script type="module">
+    <script src="./graphs.js"></script>
+    <script>
+        // Configuración de proyecciones
         proj4.defs('EPSG:4326', '+proj=longlat +datum=WGS84 +no_defs');
         proj4.defs('EPSG:32618', '+proj=utm +zone=18 +datum=WGS84 +units=m +no_defs');
 
-        window.addEventListener('load', async () => {
-            if (!window.THREE && window.Potree) window.THREE = Potree.THREE;
-            window.viewer = new Potree.Viewer(document.getElementById("potree_render_area"));
-            viewer.setEDLEnabled(true);
-            viewer.setFOV(60);
-            viewer.setPointBudget(2000000);
-            viewer.loadSettingsFromURL();
-            viewer.setDescription("");
-            viewer.loadGUI(() => {
-                viewer.setLanguage('en');
-                $("#menu_appearance").next().show();
-                $("#menu_tools").next().show();
-                $("#menu_clipping").next().show();
-                viewer.toggleSidebar();
-            });
-            Potree.loadPointCloud(
-                "./pointclouds/Malecon1/metadata.json",
-                "Malecon1",
-                e => {
-                    const pc = e.pointcloud;
-                    pc.material.size = 1;
-                    pc.material.pointSizeType = Potree.PointSizeType.ADAPTIVE;
-                    pc.material.shape = Potree.PointShape.SQUARE;
-                    viewer.scene.addPointCloud(pc);
-                    viewer.fitToScreen();
+        // Global variables
+        window.latestMarker = null;
 
-                    let latestMarker;
-                    async function fetchAndUpdate() {
-                        try {
-                            const res = await fetch('/latest');
-                            if (!res.ok) return;
-                            const data = await res.json();
-                            document.getElementById('sensor-content').innerText =
-                                `Light Level: ${data.light_level} lx\n` +
-                                `Pressure: ${data.pressure} hPa\n` +
-                                `Sound Level: ${data.sound_level} dB\n` +
-                                `Magnetic Field (µT):\n  X: ${data.mag_x}\n  Y: ${data.mag_y}\n  Z: ${data.mag_z}`;
-
-                            if (latestMarker) viewer.scene.removeMeasurement(latestMarker);
-                            if (typeof data.latitude !== 'number' || typeof data.longitude !== 'number') return;
-                            const { x, y, z } = convertToWorldCoordinates(data.latitude, data.longitude, data.altitude || 0);
-                            const meas = new Potree.Measure();
-                            meas.name = "Latest Point";
-                            meas.showCoordinates = true;
-                            meas.maxMarkers = 1;
-                            meas.addMarker(new THREE.Vector3(x, y, z));
-                            viewer.scene.addMeasurement(meas);
-                            latestMarker = meas;
-                        } catch (err) {
-                            console.error(err);
-                        }
-                    }
-                    fetchAndUpdate();
-                    setInterval(fetchAndUpdate, 5000);
-                }
-            );
-
-            // Toggle panel visibility
-            $('#sensor-data-btn, #sensor-panel .close-btn').on('click', () => {
-                $('#sensor-panel').toggle();
-            });
-            $('#clear-data-btn').on('click', () => {
-                viewer.scene.removeAllMeasurements();
-                $('#sensor-content').text('');
-            });
-        });
+        function updateConnectionStatus(online) {
+            const statusEl = document.getElementById('connection-status');
+            statusEl.textContent = online ? '● Online' : '● Offline';
+            statusEl.className = online ? 'status-online' : 'status-offline';
+        }
 
         function convertToWorldCoordinates(lat, lon, alt) {
             const [e, n] = proj4('EPSG:4326', 'EPSG:32618', [lon, lat]);
             return { x: e, y: n, z: alt + 34 };
         }
+
+        async function fetchCurrentData() {
+            try {
+                const res = await fetch('/latest');
+                if (!res.ok) { 
+                    document.getElementById('sensor-content').textContent = 'Error: Cannot connect to server'; 
+                    updateConnectionStatus(false); 
+                    return; 
+                }
+                const data = await res.json();
+                updateConnectionStatus(true);
+                
+                // Display current sensor data
+                document.getElementById('sensor-content').textContent =
+                    `Light Level: ${data.light_level || 'N/A'} lx\n` +
+                    `Pressure: ${data.pressure || 'N/A'} hPa\n` +
+                    `Sound Level: ${data.sound_level || 'N/A'} dB\n` +
+                    `Magnetic Field (µT):\n  X: ${data.mag_x || 'N/A'}\n  Y: ${data.mag_y || 'N/A'}\n  Z: ${data.mag_z || 'N/A'}\n` +
+                    `Timestamp: ${new Date().toLocaleTimeString()}`;
+
+                // Update marker on point cloud
+                if (window.latestMarker && window.viewer) {
+                    window.viewer.scene.removeMeasurement(window.latestMarker);
+                }
+                
+                if (typeof data.latitude === 'number' && typeof data.longitude === 'number' && window.viewer) {
+                    const { x, y, z } = convertToWorldCoordinates(data.latitude, data.longitude, data.altitude || 0);
+                    const meas = new Potree.Measure();
+                    meas.name = "Current Position";
+                    meas.showCoordinates = true;
+                    meas.maxMarkers = 1;
+                    meas.addMarker(new THREE.Vector3(x, y, z));
+                    window.viewer.scene.addMeasurement(meas);
+                    window.latestMarker = meas;
+                }
+
+            } catch (err) { 
+                console.error('Fetch error:', err); 
+                document.getElementById('sensor-content').textContent = 'Error: Cannot fetch data';
+                updateConnectionStatus(false);
+            }
+        }
+
+        window.addEventListener('load', function() {
+            // Event listeners setup
+            const sensorBtn = document.getElementById('sensor-data-btn');
+            const sensorPanel = document.getElementById('sensor-panel');
+            const sensorCloseBtn = document.querySelector('#sensor-panel .close-btn');
+            const clearBtn = document.getElementById('clear-data-btn');
+
+            // Sensor panel toggle
+            sensorBtn.onclick = function() {
+                sensorPanel.classList.toggle('show');
+                if (sensorPanel.classList.contains('show')) fetchCurrentData();
+            };
+            
+            sensorCloseBtn.onclick = function() {
+                sensorPanel.classList.remove('show');
+            };
+
+            // Clear data button
+            clearBtn.onclick = function() {
+                if (window.viewer) {
+                    window.viewer.scene.removeAllMeasurements();
+                    window.latestMarker = null;
+                }
+                // Limpia los datos de graphs.js
+                if (window.data && Array.isArray(window.data)) {
+                    window.data.length = 0;
+                    if (window.path && window.line) {
+                        window.path.datum(window.data).attr('d', window.line);
+                    }
+                }
+                document.getElementById('sensor-content').textContent = 'Data cleared';
+            };
+
+            // Initialize Potree viewer
+            if (!window.THREE && window.Potree) window.THREE = Potree.THREE;
+            
+            window.viewer = new Potree.Viewer(document.getElementById("potree_render_area"));
+            window.viewer.setEDLEnabled(true);
+            window.viewer.setFOV(60);
+            window.viewer.setPointBudget(2000000);
+            window.viewer.loadSettingsFromURL();
+            window.viewer.setDescription("");
+            
+            window.viewer.loadGUI(function() {
+                window.viewer.setLanguage('en');
+                if (window.$ && window.$.fn) {
+                    $("#menu_appearance").next().show();
+                    $("#menu_tools").next().show();
+                    $("#menu_clipping").next().show();
+                }
+                window.viewer.toggleSidebar();
+            });
+
+            Potree.loadPointCloud(
+                "./pointclouds/Malecon1/metadata.json",
+                "Malecon1",
+                function(e) {
+                    const pc = e.pointcloud;
+                    pc.material.size = 1;
+                    pc.material.pointSizeType = Potree.PointSizeType.ADAPTIVE;
+                    pc.material.shape = Potree.PointShape.SQUARE;
+                    window.viewer.scene.addPointCloud(pc);
+                    window.viewer.fitToScreen();
+                    fetchCurrentData();
+                    setInterval(fetchCurrentData, 5000);
+                }
+            );
+        });
     </script>
 </body>
 </html>
