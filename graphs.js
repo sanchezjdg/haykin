@@ -157,7 +157,7 @@ async function fetchAndGraph() {
         [xLight, xSound, xPressure].forEach(x => x.domain(timeExtent));
 
         // Establecer dominios con valores mínimos sensibles
-        yLight.domain([0, Math.max(100, d3.max(data, d => d.light) * 1.1)]);
+        yLight.domain([0, Math.max(10, d3.max(data, d => d.light) * 1.1)]);
         ySound.domain([0, Math.max(100, d3.max(data, d => d.sound) * 1.1)]);
         // Para la presión, usamos un rango más específico alrededor de la presión atmosférica normal
         const pressureMin = Math.min(900, d3.min(data, d => d.pressure) * 0.99);

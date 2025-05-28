@@ -290,8 +290,12 @@
                 function(e) {
                     const pc = e.pointcloud;
                     pc.material.size = 1;
+                    pc.material.activeAttributeName = "composite";
+                    pc.material.weightRGB = 0;
+                    pc.material.weightElevation = 1;
+                    pc.material.weightIntensity = 1;
                     pc.material.pointSizeType = Potree.PointSizeType.ADAPTIVE;
-                    pc.material.shape = Potree.PointShape.SQUARE;
+                    pc.material.shape = Potree.PointShape.PARABOLOID;
                     window.viewer.scene.addPointCloud(pc);
                     window.viewer.fitToScreen();
                     fetchCurrentData();
