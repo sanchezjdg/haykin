@@ -17,6 +17,8 @@
         #clear-data-btn:hover { background: rgba(0,0,0,0.8); }
         #graphs-btn { position: fixed; top: 10px; right: 190px; z-index: 1000; background: rgba(0,0,0,0.6); color: #fff; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-family: sans-serif; transition: background 0.2s; }
         #graphs-btn:hover { background: rgba(0,0,0,0.8); }
+        #trajectory-btn { position: fixed; top: 10px; right: 280px; z-index: 1000; background: rgba(0,0,0,0.6); color: #fff; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-family: sans-serif; transition: background 0.2s; }
+        #trajectory-btn:hover { background: rgba(0,0,0,0.8); }
         #sensor-panel { position: fixed; top: 50px; right: 10px; width: 280px; background: rgba(20,20,20,0.9); color: #eee; border: 1px solid #555; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.7); font-family: sans-serif; display: none; z-index: 1000; }
         #sensor-panel.show { display: block; }
         #sensor-panel .header { background: rgba(40,40,40,0.95); padding: 6px 8px; font-weight: bold; font-size: 14px; border-bottom: 1px solid #555; display: flex; justify-content: space-between; align-items: center; }
@@ -34,6 +36,7 @@
         .status-indicator { position: fixed; top: 50px; left: 10px; background: rgba(20,20,20,0.9); color: #eee; padding: 6px 12px; border-radius: 4px; font-family: sans-serif; font-size: 12px; z-index: 1000; }
         .status-online { color: #00ff88; }
         .status-offline { color: #ff4444; }
+        .trajectory-info { position: fixed; bottom: 10px; left: 10px; background: rgba(20,20,20,0.9); color: #eee; padding: 6px 12px; border-radius: 4px; font-family: sans-serif; font-size: 12px; z-index: 1000; }
     </style>
 </head>
 <body>
@@ -44,9 +47,13 @@
     <div id="status-indicator" class="status-indicator">
         <span id="connection-status" class="status-offline">● Offline</span>
     </div>
+    <div id="trajectory-info" class="trajectory-info">
+        <span id="trajectory-points">Trajectory Points: 0</span>
+    </div>
     <button id="sensor-data-btn">Data</button>
     <button id="clear-data-btn">Clear All</button>
     <button id="graphs-btn">Graphs</button>
+    <button id="trajectory-btn">Toggle Path</button>
     <div id="sensor-panel">
         <div class="header"><span>Sensor Data</span><span class="close-btn">&times;</span></div>
         <div class="content" id="sensor-content">No data available</div>
@@ -77,6 +84,9 @@
 
         // Global variables
         window.latestMarker = null;
+        window.trajectoryMeasure = null;
+        window.trajectoryPoints = [];
+        window.showTrajectory = true;
 
         function updateConnectionStatus(online) {
             const statusEl = document.getElementById('connection-status');
@@ -84,9 +94,82 @@
             statusEl.className = online ? 'status-online' : 'status-offline';
         }
 
+        function updateTrajectoryInfo() {
+            const infoEl = document.getElementById('trajectory-points');
+            infoEl.textContent = `Trajectory Points: ${window.trajectoryPoints.length}`;
+        }
+
         function convertToWorldCoordinates(lat, lon, alt) {
             const [e, n] = proj4('EPSG:4326', 'EPSG:32618', [lon, lat]);
             return { x: e, y: n, z: alt + 34 };
+        }
+
+        function addToTrajectory(x, y, z) {
+            // Agregar punto a la lista de trayectoria
+            window.trajectoryPoints.push(new THREE.Vector3(x, y, z));
+            
+            // Crear o actualizar la medida de trayectoria
+            if (window.trajectoryMeasure && window.viewer) {
+                window.viewer.scene.removeMeasurement(window.trajectoryMeasure);
+            }
+            
+            if (window.showTrajectory && window.trajectoryPoints.length > 1 && window.viewer) {
+                const measure = new Potree.Measure();
+                measure.name = "Trajectory Path";
+                measure.closed = false;
+                measure.showCoordinates = false;
+                measure.showAngles = false;
+                measure.showArea = false;
+                measure.showDistances = true;
+                
+                // Agregar todos los puntos de la trayectoria
+                window.trajectoryPoints.forEach(point => {
+                    measure.addMarker(point);
+                });
+                
+                window.viewer.scene.addMeasurement(measure);
+                window.trajectoryMeasure = measure;
+            }
+            
+            updateTrajectoryInfo();
+        }
+
+        function toggleTrajectoryVisibility() {
+            window.showTrajectory = !window.showTrajectory;
+            
+            if (!window.showTrajectory && window.trajectoryMeasure && window.viewer) {
+                window.viewer.scene.removeMeasurement(window.trajectoryMeasure);
+                window.trajectoryMeasure = null;
+            } else if (window.showTrajectory && window.trajectoryPoints.length > 1) {
+                // Recrear la trayectoria
+                const measure = new Potree.Measure();
+                measure.name = "Trajectory Path";
+                measure.closed = false;
+                measure.showCoordinates = false;
+                measure.showAngles = false;
+                measure.showArea = false;
+                measure.showDistances = true;
+                
+                window.trajectoryPoints.forEach(point => {
+                    measure.addMarker(point);
+                });
+                
+                window.viewer.scene.addMeasurement(measure);
+                window.trajectoryMeasure = measure;
+            }
+            
+            // Actualizar texto del botón
+            const btn = document.getElementById('trajectory-btn');
+            btn.textContent = window.showTrajectory ? 'Hide Path' : 'Show Path';
+        }
+
+        function clearTrajectory() {
+            if (window.trajectoryMeasure && window.viewer) {
+                window.viewer.scene.removeMeasurement(window.trajectoryMeasure);
+                window.trajectoryMeasure = null;
+            }
+            window.trajectoryPoints = [];
+            updateTrajectoryInfo();
         }
 
         async function fetchCurrentData() {
@@ -108,13 +191,15 @@
                     `Magnetic Field (µT):\n  X: ${data.mag_x || 'N/A'}\n  Y: ${data.mag_y || 'N/A'}\n  Z: ${data.mag_z || 'N/A'}\n` +
                     `Timestamp: ${new Date().toLocaleTimeString()}`;
 
-                // Update marker on point cloud
+                // Update marker on point cloud and add to trajectory
                 if (window.latestMarker && window.viewer) {
                     window.viewer.scene.removeMeasurement(window.latestMarker);
                 }
                 
                 if (typeof data.latitude === 'number' && typeof data.longitude === 'number' && window.viewer) {
                     const { x, y, z } = convertToWorldCoordinates(data.latitude, data.longitude, data.altitude || 0);
+                    
+                    // Current position marker
                     const meas = new Potree.Measure();
                     meas.name = "Current Position";
                     meas.showCoordinates = true;
@@ -122,6 +207,12 @@
                     meas.addMarker(new THREE.Vector3(x, y, z));
                     window.viewer.scene.addMeasurement(meas);
                     window.latestMarker = meas;
+                    
+                    // Add to trajectory (only if position has changed significantly)
+                    const lastPoint = window.trajectoryPoints[window.trajectoryPoints.length - 1];
+                    if (!lastPoint || lastPoint.distanceTo(new THREE.Vector3(x, y, z)) > 1.0) {
+                        addToTrajectory(x, y, z);
+                    }
                 }
 
             } catch (err) { 
@@ -137,6 +228,7 @@
             const sensorPanel = document.getElementById('sensor-panel');
             const sensorCloseBtn = document.querySelector('#sensor-panel .close-btn');
             const clearBtn = document.getElementById('clear-data-btn');
+            const trajectoryBtn = document.getElementById('trajectory-btn');
 
             // Sensor panel toggle
             sensorBtn.onclick = function() {
@@ -148,12 +240,20 @@
                 sensorPanel.classList.remove('show');
             };
 
+            // Trajectory toggle button
+            trajectoryBtn.onclick = function() {
+                toggleTrajectoryVisibility();
+            };
+
             // Clear data button
             clearBtn.onclick = function() {
                 if (window.viewer) {
                     window.viewer.scene.removeAllMeasurements();
                     window.latestMarker = null;
                 }
+                // Clear trajectory
+                clearTrajectory();
+                
                 // Limpia los datos de graphs.js
                 if (window.data && Array.isArray(window.data)) {
                     window.data.length = 0;
