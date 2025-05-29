@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Haykin</title>
+    <link rel="icon" type="image/x-icon" href="./images/logo.png">
     <link rel="stylesheet" type="text/css" href="./libs/potree/potree.css">
     <link rel="stylesheet" type="text/css" href="./libs/jquery-ui/jquery-ui.min.css">
     <link rel="stylesheet" type="text/css" href="./libs/openlayers3/ol.css">
@@ -19,6 +20,10 @@
         #graphs-btn:hover { background: rgba(0,0,0,0.8); }
         #trajectory-btn { position: fixed; top: 10px; right: 280px; z-index: 1000; background: rgba(0,0,0,0.6); color: #fff; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-family: sans-serif; transition: background 0.2s; }
         #trajectory-btn:hover { background: rgba(0,0,0,0.8); }
+        #calibrate-btn { position: fixed; top: 10px; right: 380px; z-index: 1000; background: rgba(0,0,0,0.6); color: #fff; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-family: sans-serif; transition: background 0.2s; }
+        #calibrate-btn:hover { background: rgba(0,0,0,0.8); }
+        #air-btn { position: fixed; top: 10px; right: 470px; z-index: 1000; background: rgba(0,0,0,0.6); color: #fff; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-family: sans-serif; transition: background 0.2s; }
+        #air-btn:hover { background: rgba(0,0,0,0.8); }
         #sensor-panel { position: fixed; top: 50px; right: 10px; width: 280px; background: rgba(20,20,20,0.9); color: #eee; border: 1px solid #555; border-radius: 4px; box-shadow: 0 2px 8px rgba(0,0,0,0.7); font-family: sans-serif; display: none; z-index: 1000; }
         #sensor-panel.show { display: block; }
         #sensor-panel .header { background: rgba(40,40,40,0.95); padding: 6px 8px; font-weight: bold; font-size: 14px; border-bottom: 1px solid #555; display: flex; justify-content: space-between; align-items: center; }
@@ -30,13 +35,27 @@
         #graphs-panel .header .close-btn { cursor: pointer; font-size: 16px; }
         #graphs-content { padding: 8px; height: calc(100% - 40px); overflow: hidden; }
         .axis text { fill: #ccc; font-size: 11px; }
-        .axis path, .axis line { fill: none; stroke: #666; shape-rendering: crispEdges; }
         .grid line { stroke: #333; stroke-opacity: 0.5; shape-rendering: crispEdges; }
         .grid path { stroke-width: 0; }
-        .status-indicator { position: fixed; top: 50px; left: 10px; background: rgba(20,20,20,0.9); color: #eee; padding: 6px 12px; border-radius: 4px; font-family: sans-serif; font-size: 12px; z-index: 1000; }
+        .status-indicator {
+            position: fixed;
+            top: 480px;
+            right: 10px;
+            left: unset;
+            background: rgba(20,20,20,0.9);
+            color: #eee;
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-family: sans-serif;
+            font-size: 12px;
+            z-index: 1000;
+        }
         .status-online { color: #00ff88; }
         .status-offline { color: #ff4444; }
         .trajectory-info { position: fixed; bottom: 10px; left: 10px; background: rgba(20,20,20,0.9); color: #eee; padding: 6px 12px; border-radius: 4px; font-family: sans-serif; font-size: 12px; z-index: 1000; }
+        .compass-info { position: fixed; bottom: 130px; right: 10px; background: rgba(20,20,20,0.9); color: #eee; padding: 6px 12px; border-radius: 4px; font-family: sans-serif; font-size: 12px; z-index: 1000; }
+        .calibration-status { color: #ffaa00; }
+        .calibration-complete { color: #00ff88; }
     </style>
 </head>
 <body>
@@ -50,10 +69,18 @@
     <div id="trajectory-info" class="trajectory-info">
         <span id="trajectory-points">Trajectory Points: 0</span>
     </div>
+    <!-- Panel de información de la brújula -->
+    <div class="compass-info">
+        <div id="compass-heading">Heading: ---°</div>
+        <div id="compass-calibration" class="calibration-status">Not started</div>
+    </div>
+    <!-- Panel del clima -->
+    <div id="weather-panel" class="status-indicator" style="top: 280px;">Cargando clima...</div>
     <button id="sensor-data-btn">Data</button>
     <button id="clear-data-btn">Clear All</button>
     <button id="graphs-btn">Graphs</button>
     <button id="trajectory-btn">Toggle Path</button>
+    <button id="calibrate-btn">Calibrate</button>
     <div id="sensor-panel">
         <div class="header"><span>Sensor Data</span><span class="close-btn">&times;</span></div>
         <div class="content" id="sensor-content">No data available</div>
@@ -62,6 +89,8 @@
         <div class="header"><span>Sensor Measurements</span><span class="close-btn">&times;</span></div>
         <div id="graphs-content"></div>
     </div>
+    <!-- Brújula -->
+    <div id="compass-container" style="position:fixed; bottom:10px; right:10px; z-index:1000;"></div>
     <script src="./libs/jquery/jquery-3.1.1.min.js"></script>
     <script src="./libs/spectrum/spectrum.js"></script>
     <script src="./libs/jquery-ui/jquery-ui.min.js"></script>
@@ -77,6 +106,7 @@
     <script src="./libs/potree/potree.js"></script>
     <script src="./libs/plasio/js/laslaz.js"></script>
     <script src="./graphs.js"></script>
+    <script src="./weather.js"></script>
     <script>
         // Configuración de proyecciones
         proj4.defs('EPSG:4326', '+proj=longlat +datum=WGS84 +no_defs');
@@ -88,6 +118,18 @@
         window.trajectoryPoints = [];
         window.showTrajectory = true;
 
+        // Variables para calibración de la brújula
+        window.magnetometerCalibration = {
+            isCalibrating: false,
+            samples: [],
+            maxSamples: 100,
+            minX: Infinity, maxX: -Infinity,
+            minY: Infinity, maxY: -Infinity,
+            minZ: Infinity, maxZ: -Infinity,
+            offsetX: 0, offsetY: 0, offsetZ: 0,
+            isCalibrated: false
+        };
+
         function updateConnectionStatus(online) {
             const statusEl = document.getElementById('connection-status');
             statusEl.textContent = online ? '● Online' : '● Offline';
@@ -97,6 +139,104 @@
         function updateTrajectoryInfo() {
             const infoEl = document.getElementById('trajectory-points');
             infoEl.textContent = `Trajectory Points: ${window.trajectoryPoints.length}`;
+        }
+
+        function updateCompassInfo(heading, calibrationStatus) {
+            document.getElementById('compass-heading').textContent = 
+                heading !== null ? `Heading: ${Math.round(heading)}°` : 'Heading: ---°';
+            
+            const calibEl = document.getElementById('compass-calibration');
+            calibEl.textContent = `Calibration: ${calibrationStatus}`;
+            calibEl.className = calibrationStatus === 'Complete' ? 'calibration-complete' : 'calibration-status';
+        }
+
+        function startMagnetometerCalibration() {
+            const cal = window.magnetometerCalibration;
+            cal.isCalibrating = true;
+            cal.samples = [];
+            cal.minX = cal.minY = cal.minZ = Infinity;
+            cal.maxX = cal.maxY = cal.maxZ = -Infinity;
+            
+            updateCompassInfo(null, 'In progress...');
+            
+            // Auto-stop calibration after 30 seconds
+            setTimeout(() => {
+                if (cal.isCalibrating) {
+                    finishMagnetometerCalibration();
+                }
+            }, 30000);
+        }
+
+        function addCalibrationSample(magX, magY, magZ) {
+            const cal = window.magnetometerCalibration;
+            if (!cal.isCalibrating) return;
+            
+            cal.samples.push({x: magX, y: magY, z: magZ});
+            
+            // Update min/max for each axis
+            cal.minX = Math.min(cal.minX, magX);
+            cal.maxX = Math.max(cal.maxX, magX);
+            cal.minY = Math.min(cal.minY, magY);
+            cal.maxY = Math.max(cal.maxY, magY);
+            cal.minZ = Math.min(cal.minZ, magZ);
+            cal.maxZ = Math.max(cal.maxZ, magZ);
+            
+            // Auto-finish when we have enough samples
+            if (cal.samples.length >= cal.maxSamples) {
+                finishMagnetometerCalibration();
+            }
+        }
+
+        function finishMagnetometerCalibration() {
+            const cal = window.magnetometerCalibration;
+            if (!cal.isCalibrating) return;
+            
+            cal.isCalibrating = false;
+            
+            // Calculate hard iron offset (center of the ellipsoid)
+            cal.offsetX = (cal.maxX + cal.minX) / 2;
+            cal.offsetY = (cal.maxY + cal.minY) / 2;
+            cal.offsetZ = (cal.maxZ + cal.minZ) / 2;
+            
+            cal.isCalibrated = true;
+            updateCompassInfo(null, 'Complete');
+            
+            console.log('Magnetometer calibration complete:', {
+                offsetX: cal.offsetX,
+                offsetY: cal.offsetY,
+                offsetZ: cal.offsetZ
+            });
+        }
+
+        function calculateCompassHeading(magX, magY, magZ) {
+            const cal = window.magnetometerCalibration;
+            
+            // Apply calibration if available
+            let calibratedX = magX;
+            let calibratedY = magY;
+            let calibratedZ = magZ;
+            
+            if (cal.isCalibrated) {
+                calibratedX = magX - cal.offsetX;
+                calibratedY = magY - cal.offsetY;
+                calibratedZ = magZ - cal.offsetZ;
+            }
+            
+            // Calculate heading (azimuth) in degrees
+            // Note: This assumes the device is held flat (no tilt compensation)
+            let heading = Math.atan2(calibratedY, calibratedX) * 180 / Math.PI;
+            
+            // Convert to 0-360 range
+            if (heading < 0) {
+                heading += 360;
+            }
+            
+            // Convert from magnetic east to magnetic north
+            // The magnetometer reading points towards magnetic field lines,
+            // but we want the heading (direction the device is pointing)
+            heading = (heading + 90) % 360;
+            
+            return heading;
         }
 
         function convertToWorldCoordinates(lat, lon, alt) {
@@ -178,10 +318,17 @@
                 if (!res.ok) { 
                     document.getElementById('sensor-content').textContent = 'Error: Cannot connect to server'; 
                     updateConnectionStatus(false); 
+                    drawCompass(null);
+                    updateCompassInfo(null, window.magnetometerCalibration.isCalibrated ? 'Complete' : 'Not started');
                     return; 
                 }
                 const data = await res.json();
                 updateConnectionStatus(true);
+                
+                // Actualizar el clima si hay coordenadas válidas
+                if (typeof data.latitude === 'number' && typeof data.longitude === 'number' && window.updateWeather) {
+                    window.updateWeather(data.latitude, data.longitude);
+                }
                 
                 // Display current sensor data
                 document.getElementById('sensor-content').textContent =
@@ -215,11 +362,82 @@
                     }
                 }
 
+                // Brújula: calcular ángulo corregido y dibujar
+                if (typeof data.mag_x === 'number' && typeof data.mag_y === 'number' && typeof data.mag_z === 'number') {
+                    // Add calibration sample if calibrating
+                    if (window.magnetometerCalibration.isCalibrating) {
+                        addCalibrationSample(data.mag_x, data.mag_y, data.mag_z);
+                    }
+                    
+                    const heading = calculateCompassHeading(data.mag_x, data.mag_y, data.mag_z);
+                    drawCompass(heading);
+                    
+                    const calibrationStatus = window.magnetometerCalibration.isCalibrating ? 'In progress...' :
+                                            window.magnetometerCalibration.isCalibrated ? 'Complete' : 'Not started';
+                    updateCompassInfo(heading, calibrationStatus);
+                } else {
+                    drawCompass(null);
+                    updateCompassInfo(null, window.magnetometerCalibration.isCalibrated ? 'Complete' : 'Not started');
+                }
+
             } catch (err) { 
                 console.error('Fetch error:', err); 
                 document.getElementById('sensor-content').textContent = 'Error: Cannot fetch data';
                 updateConnectionStatus(false);
+                drawCompass(null);
+                updateCompassInfo(null, window.magnetometerCalibration.isCalibrated ? 'Complete' : 'Not started');
             }
+        }
+
+        // Dibuja la brújula SVG en el contenedor
+        function drawCompass(angleDeg) {
+            const size = 110;
+            const center = size / 2;
+            const radius = 45;
+            let needleX = center, needleY = center;
+            
+            if (typeof angleDeg === 'number') {
+                // Convert heading to needle position
+                // Heading 0° = North, 90° = East, etc.
+                const rad = (angleDeg - 90) * Math.PI / 180;
+                needleX = center + radius * 0.8 * Math.cos(rad);
+                needleY = center + radius * 0.8 * Math.sin(rad);
+            }
+            
+            // Determine needle color based on calibration status
+            const needleColor = window.magnetometerCalibration.isCalibrated ? '#ff3333' : '#ffaa00';
+            
+            document.getElementById('compass-container').innerHTML = `
+                <svg width="${size}" height="${size}">
+                    <circle cx="${center}" cy="${center}" r="${radius}" fill="#222" stroke="#fff" stroke-width="3"/>
+                    <!-- Cardinales -->
+                    <text x="${center}" y="${center-33}" text-anchor="middle" fill="#fff" font-size="15" font-weight="bold">N</text>
+                    <text x="${center+33}" y="${center+5}" text-anchor="middle" fill="#fff" font-size="15" font-weight="bold">E</text>
+                    <text x="${center}" y="${center+40}" text-anchor="middle" fill="#fff" font-size="15" font-weight="bold">S</text>
+                    <text x="${center-33}" y="${center+5}" text-anchor="middle" fill="#fff" font-size="15" font-weight="bold">W</text>
+                    <!-- Aguja -->
+                    <line x1="${center}" y1="${center}" x2="${needleX}" y2="${needleY}" stroke="${needleColor}" stroke-width="4" stroke-linecap="round"/>
+                    <!-- Punta de la aguja (norte) -->
+                    <circle cx="${needleX}" cy="${needleY}" r="3" fill="${needleColor}"/>
+                    <!-- Centro -->
+                    <circle cx="${center}" cy="${center}" r="6" fill="#fff" stroke="${needleColor}" stroke-width="2"/>
+                    <!-- Marcas de grados -->
+                    ${generateDegreeMarks(center, radius)}
+                </svg>
+            `;
+        }
+
+        function generateDegreeMarks(center, radius) {
+            let marks = '';
+            for (let i = 0; i < 360; i += 30) {
+                const rad = (i - 90) * Math.PI / 180;
+                const x1 = center + (radius - 8) * Math.cos(rad);
+                const y1 = center + (radius - 8) * Math.sin(rad);
+                const x2 = center + (radius - 3) * Math.cos(rad);
+                const y2 = center + (radius - 3) * Math.sin(rad);
+                marks += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#fff" stroke-width="2"/>`;
+            }
+            return marks;
         }
 
         window.addEventListener('load', function() {
@@ -229,6 +447,8 @@
             const sensorCloseBtn = document.querySelector('#sensor-panel .close-btn');
             const clearBtn = document.getElementById('clear-data-btn');
             const trajectoryBtn = document.getElementById('trajectory-btn');
+            const calibrateBtn = document.getElementById('calibrate-btn');
+            const airBtn = document.getElementById('air-btn');
 
             // Sensor panel toggle
             sensorBtn.onclick = function() {
@@ -243,6 +463,17 @@
             // Trajectory toggle button
             trajectoryBtn.onclick = function() {
                 toggleTrajectoryVisibility();
+            };
+
+            // Calibration button
+            calibrateBtn.onclick = function() {
+                if (window.magnetometerCalibration.isCalibrating) {
+                    finishMagnetometerCalibration();
+                    calibrateBtn.textContent = 'Calibrate';
+                } else {
+                    startMagnetometerCalibration();
+                    calibrateBtn.textContent = 'Stop Cal.';
+                }
             };
 
             // Clear data button
