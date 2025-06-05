@@ -44,19 +44,33 @@ const dbClient = new DynamoDBClient({
  * @returns {Array<string>} Array of phone numbers
  */
 async function getAllPhones() {
-  try {    const result = await dbClient.send(
-      new ScanCommand({ 
+  try {
+    let phones = new Set();
+    let lastEvaluatedKey = undefined;
+    
+    do {
+      const scanParams = {
         TableName: 'locations',
-        ProjectionExpression: 'deviceId'
-      })
-    );
+        ProjectionExpression: 'deviceId',
+        ...(lastEvaluatedKey && { ExclusiveStartKey: lastEvaluatedKey })
+      };
+      
+      const result = await dbClient.send(new ScanCommand(scanParams));
+      
+      // Add this batch of deviceIds to our set
+      if (result.Items?.length) {
+        result.Items
+          .map(item => item.deviceId?.S)
+          .filter(Boolean)
+          .forEach(id => phones.add(id));
+      }
+      
+      lastEvaluatedKey = result.LastEvaluatedKey;
+    } while (lastEvaluatedKey);
 
-    if (!result.Items?.length) return [];
-
-    // Solo deviceid como identificador
-    const phones = [...new Set(result.Items.map(item => item.deviceId?.S).filter(Boolean))];
-    console.log('📱 Found phones:', phones);
-    return phones;
+    const phoneArray = Array.from(phones);
+    console.log('📱 Found phones:', phoneArray);
+    return phoneArray;
   } catch (err) {
     console.error('❌ Error fetching phones:', err);
     return [];
