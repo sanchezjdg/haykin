@@ -95,14 +95,30 @@ async function getLatestPosition(deviceId = null) {
       };
     }
 
-    const result = await dbClient.send(new ScanCommand(scanParams));
+    let allItems = [];
+    let lastEvaluatedKey = undefined;
 
-    if (!result.Items?.length) {
+    do {
+      const currentParams = {
+        ...scanParams,
+        ...(lastEvaluatedKey && { ExclusiveStartKey: lastEvaluatedKey })
+      };
+
+      const result = await dbClient.send(new ScanCommand(currentParams));
+      
+      if (result.Items?.length) {
+        allItems.push(...result.Items);
+      }
+      
+      lastEvaluatedKey = result.LastEvaluatedKey;
+    } while (lastEvaluatedKey);
+
+    if (!allItems.length) {
       console.log('ℹ️ No records found');
       return null;
     }
 
-    const parsed = result.Items
+    const parsed = allItems
       .map(item => {
         try {
           const p = item.payload?.M || item;
@@ -146,7 +162,7 @@ async function getLatestPosition(deviceId = null) {
             sound_level
           };
         } catch (e) {
-          console.error('⚠️ Error parsing item:', e);
+          console.error('⚠️ Error parsing item:', e, item);
           return null;
         }
       })
@@ -164,7 +180,8 @@ async function getLatestPosition(deviceId = null) {
       console.log(`📌 Latest record for ${deviceId}:`, latest);
       return latest;
     } else {
-      const latestByDevice = {};      parsed.forEach(record => {
+      const latestByDevice = {};
+      parsed.forEach(record => {
         if (!latestByDevice[record.deviceId] || 
             record.timestamp > latestByDevice[record.deviceId].timestamp) {
           latestByDevice[record.deviceId] = record;
