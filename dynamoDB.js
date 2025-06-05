@@ -40,19 +40,51 @@ const dbClient = new DynamoDBClient({
 })();
 
 /**
- * Fetches and returns the latest position record from DynamoDB.
- * Reprojects to UTM, applies offset to align with Potree world.
- * Parses additional sensor fields.
- * @returns {Object|null} Latest { latitude, longitude, altitude, x, y, z, timestamp, mag_x, mag_y, mag_z, light_level, pressure, sound_level } or null
+ * Gets all unique phone numbers from the Positions table
+ * @returns {Array<string>} Array of phone numbers
  */
-async function getLatestPosition() {
+async function getAllPhones() {
   try {
     const result = await dbClient.send(
-      new ScanCommand({ TableName: 'Positions' })
+      new ScanCommand({ 
+        TableName: 'Positions',
+        ProjectionExpression: 'phone'
+      })
     );
 
+    if (!result.Items?.length) return [];
+
+    const phones = [...new Set(result.Items.map(item => item.phone.S))];
+    console.log('📱 Found phones:', phones);
+    return phones;
+  } catch (err) {
+    console.error('❌ Error fetching phones:', err);
+    return [];
+  }
+}
+
+/**
+ * Fetches and returns the latest position record for a specific phone or all phones
+ * @param {string} [phone] Optional phone number to filter by
+ * @returns {Object|Array|null} Latest position data
+ */
+async function getLatestPosition(phone = null) {
+  try {
+    const scanParams = {
+      TableName: 'Positions'
+    };
+    
+    if (phone) {
+      scanParams.FilterExpression = 'phone = :phone';
+      scanParams.ExpressionAttributeValues = {
+        ':phone': { S: phone }
+      };
+    }
+
+    const result = await dbClient.send(new ScanCommand(scanParams));
+
     if (!result.Items?.length) {
-      console.log('ℹ️ No records found in Positions table');
+      console.log('ℹ️ No records found');
       return null;
     }
 
@@ -80,6 +112,7 @@ async function getLatestPosition() {
           const sound_level = Number(p.sound_level?.S ?? NaN);
 
           return {
+            phone: item.phone.S,
             latitude: lat,
             longitude: lon,
             altitude: alt,
@@ -106,13 +139,28 @@ async function getLatestPosition() {
       return null;
     }
 
-    const latest = parsed.sort((a, b) => b.timestamp - a.timestamp)[0];
-    console.log('📌 Latest record:', latest);
-    return latest;
+    // If phone is specified, return single latest record
+    // If no phone specified, return latest record for each phone
+    if (phone) {
+      const latest = parsed.sort((a, b) => b.timestamp - a.timestamp)[0];
+      console.log(`📌 Latest record for ${phone}:`, latest);
+      return latest;
+    } else {
+      const latestByPhone = {};
+      parsed.forEach(record => {
+        if (!latestByPhone[record.phone] || 
+            record.timestamp > latestByPhone[record.phone].timestamp) {
+          latestByPhone[record.phone] = record;
+        }
+      });
+      const results = Object.values(latestByPhone);
+      console.log('📌 Latest records:', results);
+      return results;
+    }
   } catch (err) {
     console.error('❌ Error fetching latest position:', err);
     return null;
   }
 }
 
-module.exports = { getLatestPosition };
+module.exports = { getLatestPosition, getAllPhones };

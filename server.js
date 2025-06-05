@@ -7,13 +7,20 @@ const express = require('express');
 const path = require('path');
 require('dotenv').config();
 
-const { getLatestPosition } = require('./dynamoDB');
+const { getLatestPosition, getAllPhones } = require('./dynamoDB');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// JSON endpoint for getting all device phones
+app.get('/devices', async (req, res) => {
+  const phones = await getAllPhones();
+  res.json(phones);
+});
+
 // JSON endpoint for the latest position
 app.get('/latest', async (req, res) => {
-  const latest = await getLatestPosition();
+  const phone = req.query.phone;
+  const latest = await getLatestPosition(phone);
   if (latest) return res.json(latest);
   res.status(404).json({ message: 'No data found' });
 });

@@ -73,14 +73,16 @@
     <div class="compass-info">
         <div id="compass-heading">Heading: ---°</div>
         <div id="compass-calibration" class="calibration-status">Not started</div>
-    </div>
-    <!-- Panel del clima -->
+    </div>    <!-- Panel del clima -->
     <div id="weather-panel" class="status-indicator" style="top: 280px;">Cargando clima...</div>
     <button id="sensor-data-btn">Data</button>
     <button id="clear-data-btn">Clear All</button>
     <button id="graphs-btn">Graphs</button>
     <button id="trajectory-btn">Toggle Path</button>
     <button id="calibrate-btn">Calibrate</button>
+    <select id="device-select" style="position:fixed;top:10px;right:560px;z-index:1000;padding:6px 12px;border-radius:4px;font-size:15px;">
+        <option value="">Todos los dispositivos</option>
+    </select>
     <div id="sensor-panel">
         <div class="header"><span>Sensor Data</span><span class="close-btn">&times;</span></div>
         <div class="content" id="sensor-content">No data available</div>
@@ -113,22 +115,40 @@
         proj4.defs('EPSG:32618', '+proj=utm +zone=18 +datum=WGS84 +units=m +no_defs');
 
         // Global variables
-        window.latestMarker = null;
-        window.trajectoryMeasure = null;
-        window.trajectoryPoints = [];
+        window.deviceMarkers = new Map(); // Mapa de phone -> marker
+        window.deviceTrajectories = new Map(); // Mapa de phone -> {points: [], measure: null}
         window.showTrajectory = true;
-
+        window.selectedDevice = null;
+        
         // Variables para calibración de la brújula
         window.magnetometerCalibration = {
             isCalibrating: false,
+            isCalibrated: false,
             samples: [],
             maxSamples: 100,
-            minX: Infinity, maxX: -Infinity,
-            minY: Infinity, maxY: -Infinity,
-            minZ: Infinity, maxZ: -Infinity,
-            offsetX: 0, offsetY: 0, offsetZ: 0,
-            isCalibrated: false
+            minX: Infinity,
+            minY: Infinity,
+            minZ: Infinity,
+            maxX: -Infinity,
+            maxY: -Infinity,
+            maxZ: -Infinity,
+            offsetX: 0,
+            offsetY: 0,
+            offsetZ: 0
         };
+
+        async function populateDeviceSelect() {
+            const select = document.getElementById('device-select');
+            select.innerHTML = '<option value="">Cargando...</option>';
+            try {
+                const res = await fetch('/devices');
+                const devices = await res.json();                select.innerHTML = '<option value="">Todos los dispositivos</option>' + 
+                    (devices.length ? devices.map(phone => `<option value="${phone}">${phone}</option>`).join('') : '');
+                window.selectedDevice = '';
+            } catch {
+                select.innerHTML = '<option value="">Error</option>';
+            }
+        }
 
         function updateConnectionStatus(online) {
             const statusEl = document.getElementById('connection-status');
@@ -138,7 +158,9 @@
 
         function updateTrajectoryInfo() {
             const infoEl = document.getElementById('trajectory-points');
-            infoEl.textContent = `Trajectory Points: ${window.trajectoryPoints.length}`;
+            const totalPoints = Array.from(window.deviceTrajectories.values())
+                .reduce((sum, traj) => sum + traj.points.length, 0);
+            infoEl.textContent = `Trajectory Points: ${totalPoints}`;
         }
 
         function updateCompassInfo(heading, calibrationStatus) {
@@ -244,18 +266,38 @@
             return { x: e, y: n, z: alt + 34 };
         }
 
-        function addToTrajectory(x, y, z) {
-            // Agregar punto a la lista de trayectoria
-            window.trajectoryPoints.push(new THREE.Vector3(x, y, z));
+        function addToTrajectory(phone, x, y, z) {
+            // Obtener o crear trayectoria para este dispositivo
+            if (!window.deviceTrajectories.has(phone)) {
+                window.deviceTrajectories.set(phone, {
+                    points: [],
+                    measure: null
+                });
+            }
+            const trajectory = window.deviceTrajectories.get(phone);
             
-            // Crear o actualizar la medida de trayectoria
-            if (window.trajectoryMeasure && window.viewer) {
-                window.viewer.scene.removeMeasurement(window.trajectoryMeasure);
+            // Agregar punto a la lista de trayectoria
+            trajectory.points.push(new THREE.Vector3(x, y, z));
+            
+            // Actualizar visualización si está visible
+            updateTrajectoryVisibility(phone);
+            updateTrajectoryInfo();
+        }
+
+        function updateTrajectoryVisibility(phone) {
+            const trajectory = window.deviceTrajectories.get(phone);
+            if (!trajectory) return;
+
+            // Remover medida existente si hay
+            if (trajectory.measure && window.viewer) {
+                window.viewer.scene.removeMeasurement(trajectory.measure);
+                trajectory.measure = null;
             }
             
-            if (window.showTrajectory && window.trajectoryPoints.length > 1 && window.viewer) {
+            // Crear nueva medida si la trayectoria está visible y hay puntos
+            if (window.showTrajectory && trajectory.points.length > 1 && window.viewer) {
                 const measure = new Potree.Measure();
-                measure.name = "Trajectory Path";
+                measure.name = `Trajectory Path (${phone})`;
                 measure.closed = false;
                 measure.showCoordinates = false;
                 measure.showAngles = false;
@@ -263,40 +305,22 @@
                 measure.showDistances = true;
                 
                 // Agregar todos los puntos de la trayectoria
-                window.trajectoryPoints.forEach(point => {
+                trajectory.points.forEach(point => {
                     measure.addMarker(point);
                 });
                 
                 window.viewer.scene.addMeasurement(measure);
-                window.trajectoryMeasure = measure;
+                trajectory.measure = measure;
             }
-            
-            updateTrajectoryInfo();
         }
 
         function toggleTrajectoryVisibility() {
             window.showTrajectory = !window.showTrajectory;
             
-            if (!window.showTrajectory && window.trajectoryMeasure && window.viewer) {
-                window.viewer.scene.removeMeasurement(window.trajectoryMeasure);
-                window.trajectoryMeasure = null;
-            } else if (window.showTrajectory && window.trajectoryPoints.length > 1) {
-                // Recrear la trayectoria
-                const measure = new Potree.Measure();
-                measure.name = "Trajectory Path";
-                measure.closed = false;
-                measure.showCoordinates = false;
-                measure.showAngles = false;
-                measure.showArea = false;
-                measure.showDistances = true;
-                
-                window.trajectoryPoints.forEach(point => {
-                    measure.addMarker(point);
-                });
-                
-                window.viewer.scene.addMeasurement(measure);
-                window.trajectoryMeasure = measure;
-            }
+            // Actualizar todas las trayectorias
+            window.deviceTrajectories.forEach((_, phone) => {
+                updateTrajectoryVisibility(phone);
+            });
             
             // Actualizar texto del botón
             const btn = document.getElementById('trajectory-btn');
@@ -304,82 +328,115 @@
         }
 
         function clearTrajectory() {
-            if (window.trajectoryMeasure && window.viewer) {
-                window.viewer.scene.removeMeasurement(window.trajectoryMeasure);
-                window.trajectoryMeasure = null;
-            }
-            window.trajectoryPoints = [];
+            // Limpiar todas las trayectorias y marcadores
+            window.deviceTrajectories.forEach(trajectory => {
+                if (trajectory.measure && window.viewer) {
+                    window.viewer.scene.removeMeasurement(trajectory.measure);
+                }
+            });
+            window.deviceTrajectories.clear();
+            
+            window.deviceMarkers.forEach(marker => {
+                if (marker && window.viewer) {
+                    window.viewer.scene.removeMeasurement(marker);
+                }
+            });
+            window.deviceMarkers.clear();
+            
             updateTrajectoryInfo();
         }
 
         async function fetchCurrentData() {
             try {
-                const res = await fetch('/latest');
-                if (!res.ok) { 
-                    document.getElementById('sensor-content').textContent = 'Error: Cannot connect to server'; 
-                    updateConnectionStatus(false); 
-                    drawCompass(null);
-                    updateCompassInfo(null, window.magnetometerCalibration.isCalibrated ? 'Complete' : 'Not started');
-                    return; 
-                }
-                const data = await res.json();
-                updateConnectionStatus(true);
+                // Si está seleccionado "Todos los dispositivos", obtener la lista de dispositivos
+                const phone = window.selectedDevice;
+                let devices = [];
                 
-                // Actualizar el clima si hay coordenadas válidas
-                if (typeof data.latitude === 'number' && typeof data.longitude === 'number' && window.updateWeather) {
-                    window.updateWeather(data.latitude, data.longitude);
-                }
-                
-                // Display current sensor data
-                document.getElementById('sensor-content').textContent =
-                    `Light Level: ${data.light_level || 'N/A'} lx\n` +
-                    `Pressure: ${data.pressure || 'N/A'} hPa\n` +
-                    `Sound Level: ${data.sound_level || 'N/A'} dB\n` +
-                    `Magnetic Field (µT):\n  X: ${data.mag_x || 'N/A'}\n  Y: ${data.mag_y || 'N/A'}\n  Z: ${data.mag_z || 'N/A'}\n` +
-                    `Timestamp: ${new Date().toLocaleTimeString()}`;
-
-                // Update marker on point cloud and add to trajectory
-                if (window.latestMarker && window.viewer) {
-                    window.viewer.scene.removeMeasurement(window.latestMarker);
-                }
-                
-                if (typeof data.latitude === 'number' && typeof data.longitude === 'number' && window.viewer) {
-                    const { x, y, z } = convertToWorldCoordinates(data.latitude, data.longitude, data.altitude || 0);
-                    
-                    // Current position marker
-                    const meas = new Potree.Measure();
-                    meas.name = "Current Position";
-                    meas.showCoordinates = true;
-                    meas.maxMarkers = 1;
-                    meas.addMarker(new THREE.Vector3(x, y, z));
-                    window.viewer.scene.addMeasurement(meas);
-                    window.latestMarker = meas;
-                    
-                    // Add to trajectory (only if position has changed significantly)
-                    const lastPoint = window.trajectoryPoints[window.trajectoryPoints.length - 1];
-                    if (!lastPoint || lastPoint.distanceTo(new THREE.Vector3(x, y, z)) > 1.0) {
-                        addToTrajectory(x, y, z);
+                if (!phone) {
+                    try {
+                        const devicesRes = await fetch('/devices');
+                        devices = await devicesRes.json();
+                    } catch (err) {
+                        console.error('Error fetching devices:', err);
+                        devices = [];
                     }
-                }
-
-                // Brújula: calcular ángulo corregido y dibujar
-                if (typeof data.mag_x === 'number' && typeof data.mag_y === 'number' && typeof data.mag_z === 'number') {
-                    // Add calibration sample if calibrating
-                    if (window.magnetometerCalibration.isCalibrating) {
-                        addCalibrationSample(data.mag_x, data.mag_y, data.mag_z);
-                    }
-                    
-                    const heading = calculateCompassHeading(data.mag_x, data.mag_y, data.mag_z);
-                    drawCompass(heading);
-                    
-                    const calibrationStatus = window.magnetometerCalibration.isCalibrating ? 'In progress...' :
-                                            window.magnetometerCalibration.isCalibrated ? 'Complete' : 'Not started';
-                    updateCompassInfo(heading, calibrationStatus);
                 } else {
-                    drawCompass(null);
-                    updateCompassInfo(null, window.magnetometerCalibration.isCalibrated ? 'Complete' : 'Not started');
+                    devices = [phone];
                 }
 
+                // Obtener datos para cada dispositivo
+                for (const devicePhone of devices) {
+                    const res = await fetch('/latest?phone=' + encodeURIComponent(devicePhone));
+                    if (!res.ok) continue;
+                    
+                    const data = await res.json();
+                    updateConnectionStatus(true);
+                    
+                    // Actualizar el clima si hay coordenadas válidas (solo para el dispositivo seleccionado)
+                    if (devicePhone === phone && typeof data.latitude === 'number' && 
+                        typeof data.longitude === 'number' && window.updateWeather) {
+                        window.updateWeather(data.latitude, data.longitude);
+                    }
+                    
+                    // Display current sensor data (solo para el dispositivo seleccionado)
+                    if (devicePhone === phone) {
+                        document.getElementById('sensor-content').textContent =
+                            `Device: ${devicePhone}\n` +
+                            `Light Level: ${data.light_level || 'N/A'} lx\n` +
+                            `Pressure: ${data.pressure || 'N/A'} hPa\n` +
+                            `Sound Level: ${data.sound_level || 'N/A'} dB\n` +
+                            `Magnetic Field (µT):\n  X: ${data.mag_x || 'N/A'}\n  Y: ${data.mag_y || 'N/A'}\n  Z: ${data.mag_z || 'N/A'}\n` +
+                            `Timestamp: ${new Date().toLocaleTimeString()}`;
+                    }
+                    
+                    // Update marker on point cloud and add to trajectory
+                    if (typeof data.latitude === 'number' && typeof data.longitude === 'number' && window.viewer) {
+                        const { x, y, z } = convertToWorldCoordinates(data.latitude, data.longitude, data.altitude || 0);
+                        
+                        // Remover marcador anterior si existe
+                        const oldMarker = window.deviceMarkers.get(devicePhone);
+                        if (oldMarker && window.viewer) {
+                            window.viewer.scene.removeMeasurement(oldMarker);
+                        }
+                        
+                        // Current position marker
+                        const meas = new Potree.Measure();
+                        meas.name = `Position (${devicePhone})`;
+                        meas.showCoordinates = true;
+                        meas.maxMarkers = 1;
+                        meas.addMarker(new THREE.Vector3(x, y, z));
+                        window.viewer.scene.addMeasurement(meas);
+                        window.deviceMarkers.set(devicePhone, meas);
+                        
+                        // Add to trajectory
+                        if (!window.deviceTrajectories.has(devicePhone)) {
+                            window.deviceTrajectories.set(devicePhone, { points: [], measure: null });
+                        }
+                        const lastPoint = window.deviceTrajectories.get(devicePhone).points.slice(-1)[0];
+                        if (!lastPoint || lastPoint.distanceTo(new THREE.Vector3(x, y, z)) > 1.0) {
+                            addToTrajectory(devicePhone, x, y, z);
+                        }
+                    }
+
+                    // Brújula: solo actualizar para el dispositivo seleccionado
+                    if (devicePhone === phone) {
+                        if (typeof data.mag_x === 'number' && typeof data.mag_y === 'number' && typeof data.mag_z === 'number') {
+                            if (window.magnetometerCalibration.isCalibrating) {
+                                addCalibrationSample(data.mag_x, data.mag_y, data.mag_z);
+                            }
+                            
+                            const heading = calculateCompassHeading(data.mag_x, data.mag_y, data.mag_z);
+                            drawCompass(heading);
+                            
+                            const calibrationStatus = window.magnetometerCalibration.isCalibrating ? 'In progress...' :
+                                                    window.magnetometerCalibration.isCalibrated ? 'Complete' : 'Not started';
+                            updateCompassInfo(heading, calibrationStatus);
+                        } else {
+                            drawCompass(null);
+                            updateCompassInfo(null, window.magnetometerCalibration.isCalibrated ? 'Complete' : 'Not started');
+                        }
+                    }
+                }
             } catch (err) { 
                 console.error('Fetch error:', err); 
                 document.getElementById('sensor-content').textContent = 'Error: Cannot fetch data';
@@ -449,6 +506,7 @@
             const trajectoryBtn = document.getElementById('trajectory-btn');
             const calibrateBtn = document.getElementById('calibrate-btn');
             const airBtn = document.getElementById('air-btn');
+            const deviceSelect = document.getElementById('device-select');
 
             // Sensor panel toggle
             sensorBtn.onclick = function() {
@@ -495,6 +553,17 @@
                 document.getElementById('sensor-content').textContent = 'Data cleared';
             };
 
+            // Device selector change
+            deviceSelect.onchange = function() {
+                window.selectedDevice = deviceSelect.value;
+                if (window.viewer) {
+                    window.viewer.scene.removeAllMeasurements();
+                    window.latestMarker = null;
+                }
+                clearTrajectory();
+                fetchCurrentData();
+            };
+
             // Initialize Potree viewer
             if (!window.THREE && window.Potree) window.THREE = Potree.THREE;
             
@@ -533,6 +602,8 @@
                     setInterval(fetchCurrentData, 5000);
                 }
             );
+
+            populateDeviceSelect();
         });
     </script>
 </body>
