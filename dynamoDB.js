@@ -32,7 +32,7 @@ const dbClient = new DynamoDBClient({
 // Test connection on startup
 (async () => {
   try {
-    await dbClient.send(new ScanCommand({ TableName: 'Positions', Limit: 1 }));
+    await dbClient.send(new ScanCommand({ TableName: 'locations', Limit: 1 }));
     console.log('✅ DynamoDB connection successful');
   } catch (err) {
     console.error('❌ DynamoDB connection error:', err);
@@ -44,17 +44,17 @@ const dbClient = new DynamoDBClient({
  * @returns {Array<string>} Array of phone numbers
  */
 async function getAllPhones() {
-  try {
-    const result = await dbClient.send(
+  try {    const result = await dbClient.send(
       new ScanCommand({ 
-        TableName: 'Positions',
-        ProjectionExpression: 'phone'
+        TableName: 'locations',
+        ProjectionExpression: 'deviceId'
       })
     );
 
     if (!result.Items?.length) return [];
 
-    const phones = [...new Set(result.Items.map(item => item.phone.S))];
+    // Solo deviceid como identificador
+    const phones = [...new Set(result.Items.map(item => item.deviceId?.S).filter(Boolean))];
     console.log('📱 Found phones:', phones);
     return phones;
   } catch (err) {
@@ -64,20 +64,20 @@ async function getAllPhones() {
 }
 
 /**
- * Fetches and returns the latest position record for a specific phone or all phones
- * @param {string} [phone] Optional phone number to filter by
+ * Fetches and returns the latest position record for a specific device or all devices
+ * @param {string} [deviceid] Optional deviceId to filter by
  * @returns {Object|Array|null} Latest position data
  */
-async function getLatestPosition(phone = null) {
+async function getLatestPosition(deviceId = null) {
   try {
     const scanParams = {
-      TableName: 'Positions'
+      TableName: 'locations',
     };
     
-    if (phone) {
-      scanParams.FilterExpression = 'phone = :phone';
+    if (deviceId) {
+      scanParams.FilterExpression = 'deviceId = :deviceId';
       scanParams.ExpressionAttributeValues = {
-        ':phone': { S: phone }
+        ':deviceId': { S: deviceId }
       };
     }
 
@@ -91,28 +91,32 @@ async function getLatestPosition(phone = null) {
     const parsed = result.Items
       .map(item => {
         try {
-          const p = item.payload.M;
-          const ts = Number(p.timestamp.S);
-          const lat = Number(p.latitude.S);
-          const lon = Number(p.longitude.S);
-          const alt = Number(p.altitude.S);
+          const p = item.payload?.M || item;
+          const ts = Number(p.timestamp?.S ?? p.timestamp?.N ?? p.timestamp ?? Date.now());
+          const lat = Number(p.latitude?.S ?? p.latitude?.N ?? p.latitude);
+          const lon = Number(p.longitude?.S ?? p.longitude?.N ?? p.longitude);
+          const alt = Number(p.altitude?.S ?? p.altitude?.N ?? p.altitude ?? 0);
 
-          // Reproject to UTM Zone 18N
+          // Reproject to UTM Zone 18N and apply offset
           const [easting, northing] = proj4(WGS84, UTM18N, [lon, lat]);
-          const x = easting - METADATA_OFFSET[0];
-          const y = northing - METADATA_OFFSET[1];
-          const z = alt - METADATA_OFFSET[2];
+          const x = easting
+          const y = northing 
+          const z = alt + 34
 
-          // Sensor fields
-          const mag_x = Number(p.mag_x?.S ?? NaN);
-          const mag_y = Number(p.mag_y?.S ?? NaN);
-          const mag_z = Number(p.mag_z?.S ?? NaN);
-          const light_level = Number(p.light_level?.S ?? NaN);
-          const pressure = Number(p.pressure?.S ?? NaN);
-          const sound_level = Number(p.sound_level?.S ?? NaN);
+          // Get custom data
+          const customData = p.custom?.M || p.custom || {};
+          const magneticField = customData.magnetic_field?.M || customData.magnetic_field || {};
+          
+          // Sensor fields - now reading from custom object
+          const mag_x = Number(magneticField.x?.S ?? magneticField.x?.N ?? magneticField.x ?? NaN);
+          const mag_y = Number(magneticField.y?.S ?? magneticField.y?.N ?? magneticField.y ?? NaN);
+          const mag_z = Number(magneticField.z?.S ?? magneticField.z?.N ?? magneticField.z ?? NaN);
+          const light_level = Number(customData.light_level?.S ?? customData.light_level?.N ?? customData.light_level ?? NaN);
+          const pressure = Number(customData.pressure?.S ?? customData.pressure?.N ?? customData.pressure ?? NaN);
+          const sound_level = Number(customData.sound_level?.S ?? customData.sound_level?.N ?? customData.sound_level ?? NaN);
 
           return {
-            phone: item.phone.S,
+            deviceId: item.deviceId?.S,
             latitude: lat,
             longitude: lon,
             altitude: alt,
@@ -139,21 +143,20 @@ async function getLatestPosition(phone = null) {
       return null;
     }
 
-    // If phone is specified, return single latest record
-    // If no phone specified, return latest record for each phone
-    if (phone) {
+    // Si se especifica deviceId, retorna el último registro de ese dispositivo
+    // Si no, retorna el último registro de cada dispositivo
+    if (deviceId) {
       const latest = parsed.sort((a, b) => b.timestamp - a.timestamp)[0];
-      console.log(`📌 Latest record for ${phone}:`, latest);
+      console.log(`📌 Latest record for ${deviceId}:`, latest);
       return latest;
     } else {
-      const latestByPhone = {};
-      parsed.forEach(record => {
-        if (!latestByPhone[record.phone] || 
-            record.timestamp > latestByPhone[record.phone].timestamp) {
-          latestByPhone[record.phone] = record;
+      const latestByDevice = {};      parsed.forEach(record => {
+        if (!latestByDevice[record.deviceId] || 
+            record.timestamp > latestByDevice[record.deviceId].timestamp) {
+          latestByDevice[record.deviceId] = record;
         }
       });
-      const results = Object.values(latestByPhone);
+      const results = Object.values(latestByDevice);
       console.log('📌 Latest records:', results);
       return results;
     }

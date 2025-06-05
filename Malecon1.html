@@ -88,7 +88,7 @@
         <div class="content" id="sensor-content">No data available</div>
     </div>
     <div id="graphs-panel">
-        <div class="header"><span>Sensor Measurements</span><span class="close-btn">&times;</span></div>
+        <div class="header"><span>Sensor Measurements</span><span class="close-btn">&times;</div>
         <div id="graphs-content"></div>
     </div>
     <!-- Brújula -->
@@ -142,10 +142,13 @@
             select.innerHTML = '<option value="">Cargando...</option>';
             try {
                 const res = await fetch('/devices');
-                const devices = await res.json();                select.innerHTML = '<option value="">Todos los dispositivos</option>' + 
-                    (devices.length ? devices.map(phone => `<option value="${phone}">${phone}</option>`).join('') : '');
+                const devices = await res.json();
+                console.log('Devices found:', devices); // Debug log
+                select.innerHTML = '<option value="">Todos los dispositivos</option>' +                    (devices.length ? devices.map(deviceId => 
+                        `<option value="${deviceId}">${deviceId}</option>`).join('') : '');
                 window.selectedDevice = '';
-            } catch {
+            } catch (err) {
+                console.error('Error loading devices:', err);
                 select.innerHTML = '<option value="">Error</option>';
             }
         }
@@ -370,79 +373,68 @@
                     if (!res.ok) continue;
                     
                     const data = await res.json();
+                    console.log('Received data:', data); // Debug log
                     updateConnectionStatus(true);
-                    
-                    // Actualizar el clima si hay coordenadas válidas (solo para el dispositivo seleccionado)
-                    if (devicePhone === phone && typeof data.latitude === 'number' && 
-                        typeof data.longitude === 'number' && window.updateWeather) {
-                        window.updateWeather(data.latitude, data.longitude);
-                    }
-                    
-                    // Display current sensor data (solo para el dispositivo seleccionado)
-                    if (devicePhone === phone) {
-                        document.getElementById('sensor-content').textContent =
-                            `Device: ${devicePhone}\n` +
-                            `Light Level: ${data.light_level || 'N/A'} lx\n` +
-                            `Pressure: ${data.pressure || 'N/A'} hPa\n` +
-                            `Sound Level: ${data.sound_level || 'N/A'} dB\n` +
-                            `Magnetic Field (µT):\n  X: ${data.mag_x || 'N/A'}\n  Y: ${data.mag_y || 'N/A'}\n  Z: ${data.mag_z || 'N/A'}\n` +
-                            `Timestamp: ${new Date().toLocaleTimeString()}`;
-                    }
-                    
-                    // Update marker on point cloud and add to trajectory
+                      // Verificar que tenemos las coordenadas necesarias
                     if (typeof data.latitude === 'number' && typeof data.longitude === 'number' && window.viewer) {
-                        const { x, y, z } = convertToWorldCoordinates(data.latitude, data.longitude, data.altitude || 0);
-                        
-                        // Remover marcador anterior si existe
-                        const oldMarker = window.deviceMarkers.get(devicePhone);
-                        if (oldMarker && window.viewer) {
-                            window.viewer.scene.removeMeasurement(oldMarker);
-                        }
-                        
-                        // Current position marker
-                        const meas = new Potree.Measure();
-                        meas.name = `Position (${devicePhone})`;
-                        meas.showCoordinates = true;
-                        meas.maxMarkers = 1;
-                        meas.addMarker(new THREE.Vector3(x, y, z));
-                        window.viewer.scene.addMeasurement(meas);
-                        window.deviceMarkers.set(devicePhone, meas);
-                        
-                        // Add to trajectory
-                        if (!window.deviceTrajectories.has(devicePhone)) {
-                            window.deviceTrajectories.set(devicePhone, { points: [], measure: null });
-                        }
-                        const lastPoint = window.deviceTrajectories.get(devicePhone).points.slice(-1)[0];
-                        if (!lastPoint || lastPoint.distanceTo(new THREE.Vector3(x, y, z)) > 1.0) {
-                            addToTrajectory(devicePhone, x, y, z);
-                        }
-                    }
+                        // Crear el punto en el mapa
+                        const pos = new THREE.Vector3(data.x, data.y, data.z);
+                        console.log('Position:', pos); // Debug log
 
-                    // Brújula: solo actualizar para el dispositivo seleccionado
-                    if (devicePhone === phone) {
-                        if (typeof data.mag_x === 'number' && typeof data.mag_y === 'number' && typeof data.mag_z === 'number') {
+                        // Process magnetometer data if available
+                        if (data.mag_x !== undefined && data.mag_y !== undefined && data.mag_z !== undefined) {
+                            // Add calibration sample if calibrating
                             if (window.magnetometerCalibration.isCalibrating) {
                                 addCalibrationSample(data.mag_x, data.mag_y, data.mag_z);
                             }
                             
+                            // Calculate and update compass heading
                             const heading = calculateCompassHeading(data.mag_x, data.mag_y, data.mag_z);
+                            updateCompassInfo(heading, 
+                                window.magnetometerCalibration.isCalibrated ? 'Complete' : 'Uncalibrated');
                             drawCompass(heading);
-                            
-                            const calibrationStatus = window.magnetometerCalibration.isCalibrating ? 'In progress...' :
-                                                    window.magnetometerCalibration.isCalibrated ? 'Complete' : 'Not started';
-                            updateCompassInfo(heading, calibrationStatus);
-                        } else {
-                            drawCompass(null);
-                            updateCompassInfo(null, window.magnetometerCalibration.isCalibrated ? 'Complete' : 'Not started');
                         }
+                        
+                        // Remover marcador anterior si existe
+                        const oldMarker = window.deviceMarkers.get(devicePhone);
+                        if (oldMarker) {
+                            window.viewer.scene.removeMeasurement(oldMarker);
+                        }
+
+                        // Crear nuevo marcador
+                        const measure = new Potree.Measure();
+                        measure.name = `Position (${devicePhone})`;
+                        measure.showCoordinates = true;
+                        measure.maxMarkers = 1;
+                        measure.addMarker(pos);
+                        window.viewer.scene.addMeasurement(measure);
+                        window.deviceMarkers.set(devicePhone, measure);
+                        
+                        // Actualizar trayectoria
+                        if (window.showTrajectory) {
+                            addToTrajectory(devicePhone, data.x, data.y, data.z);
+                        }
+                    } else {
+                        console.error('Invalid coordinates in data:', data);
+                    }
+
+                    // Display current sensor data
+                    if (devicePhone === phone) {
+                        document.getElementById('sensor-content').textContent = 
+                            `Device: ${devicePhone}\n` +
+                            `Position: (${data.x.toFixed(2)}, ${data.y.toFixed(2)}, ${data.z.toFixed(2)})\n` +
+                            `Lat/Long: ${data.latitude.toFixed(6)}, ${data.longitude.toFixed(6)}\n` +
+                            `Altitude: ${data.altitude || 0} m\n` +
+                            `Light Level: ${data.light_level || 'N/A'} lx\n` +
+                            `Pressure: ${data.pressure || 'N/A'} hPa\n` +
+                            `Sound Level: ${data.sound_level || 'N/A'} dB\n` +
+                            `Timestamp: ${new Date().toLocaleTimeString()}`;
                     }
                 }
-            } catch (err) { 
-                console.error('Fetch error:', err); 
+            } catch (err) {
+                console.error('Fetch error:', err);
                 document.getElementById('sensor-content').textContent = 'Error: Cannot fetch data';
                 updateConnectionStatus(false);
-                drawCompass(null);
-                updateCompassInfo(null, window.magnetometerCalibration.isCalibrated ? 'Complete' : 'Not started');
             }
         }
 

@@ -145,16 +145,20 @@ async function fetchAndGraph() {
         const res = await fetch(url);
         if (!res.ok) return;
         const response = await res.json();
-        
-        // Si la respuesta es un array (múltiples dispositivos), tomar el primero
+          // Si la respuesta es un array (múltiples dispositivos), tomar el primero
         const d = Array.isArray(response) ? response[0] : response;
         if (!d) return;
 
+        // Get the sensor values from the response
+        const light = d.light_level || 0;
+        const sound = d.sound_level || 0;
+        const pressure = d.pressure || 0;
+
         data.push({
             time: new Date(),
-            light: d.light_level || 0,
-            sound: d.sound_level || 0,
-            pressure: d.pressure || 0
+            light: light,
+            sound: sound,
+            pressure: pressure
         });
 
         if (data.length > maxPoints) data.shift();
