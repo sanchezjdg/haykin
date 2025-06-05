@@ -139,15 +139,22 @@ const pathPressure = svgPressure.append('path')
 
 async function fetchAndGraph() {
     try {
-        const res = await fetch('/latest');
+        const deviceSelect = document.getElementById('device-select');
+        const selectedDevice = deviceSelect ? deviceSelect.value : '';
+        const url = '/latest' + (selectedDevice ? `?phone=${encodeURIComponent(selectedDevice)}` : '');
+        const res = await fetch(url);
         if (!res.ok) return;
-        const d = await res.json();
+        const response = await res.json();
+        
+        // Si la respuesta es un array (múltiples dispositivos), tomar el primero
+        const d = Array.isArray(response) ? response[0] : response;
+        if (!d) return;
 
         data.push({
             time: new Date(),
-            light: d.light_level,
-            sound: d.sound_level,
-            pressure: d.pressure
+            light: d.light_level || 0,
+            sound: d.sound_level || 0,
+            pressure: d.pressure || 0
         });
 
         if (data.length > maxPoints) data.shift();
@@ -199,13 +206,45 @@ async function fetchAndGraph() {
 const graphsBtn = document.getElementById('graphs-btn');
 const graphsPanel = document.getElementById('graphs-panel');
 
+// Función para iniciar/detener el polling
+function togglePolling(start) {
+    if (polling) clearInterval(polling);
+    polling = start ? setInterval(fetchAndGraph, 5000) : null;
+}
+
+// Exponer variables y funciones clave al objeto global window
+window.data = data;
+window.pathLight = pathLight;
+window.pathSound = pathSound;
+window.pathPressure = pathPressure;
+window.lineLight = lineLight;
+window.lineSound = lineSound;
+window.linePressure = linePressure;
+
+window.clearGraphs = function() {
+    window.data.length = 0;
+    window.pathLight.datum(window.data).attr('d', window.lineLight);
+    window.pathSound.datum(window.data).attr('d', window.lineSound);
+    window.pathPressure.datum(window.data).attr('d', window.linePressure);
+};
+
+// Event listener para el botón de gráficas
 graphsBtn.addEventListener('click', function() {
     graphsPanel.classList.toggle('show');
     
     if (graphsPanel.classList.contains('show')) {
+        window.clearGraphs();
         fetchAndGraph();
-        polling = setInterval(fetchAndGraph, 5000);
+        togglePolling(true);
     } else {
-        clearInterval(polling);
+        togglePolling(false);
+    }
+});
+
+// Event listener para cambios en la selección del dispositivo
+document.getElementById('device-select')?.addEventListener('change', function() {
+    if (graphsPanel.classList.contains('show')) {
+        window.clearGraphs();
+        fetchAndGraph();
     }
 });
