@@ -1,5 +1,5 @@
 // Configuración global
-const apiKey = 'f29b5cbc242acd4da814411ea92e6090';
+const apiKey = '';
 const defaultLat = 11.0041; // Barranquilla
 const defaultLon = -74.8070; // Barranquilla
 const UPDATE_INTERVAL = 60 * 1000; // 1 minuto en ms
